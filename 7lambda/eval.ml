@@ -1,4 +1,4 @@
-open Syntax
+ open Syntax
 open Value
 
 (* DS version *)
@@ -72,6 +72,38 @@ let rec g1 expr env = match expr with
       end
   | Shift (x, t) -> VError "Shift not supported yet."
   | Reset (t) -> VError "Reset not supported yet."
+  | Control (x, t) -> VError "Control not supported yet."
+  | Prompt (t) -> VError "Prompt not supported yet."
+  | Shift0 (x, t) -> VError "Shift0 not supported yet."
+  | Reset0 (t) -> VError "Reset0 not supported yet."
+  | Control0 (x, t) -> VError "Control0 not supported yet."
+  | Prompt0 (t) -> VError "Prompt0 not supported yet."
+
+
+let id = fun v -> HV (v)
+
+let rec hr_stop h k' =
+  match h with
+  | H (c, f) -> hr_stop (f c id) k'
+  | HV (v) -> k' v
+  | _ -> VError ("Not a H function: " ^
+                 Value.to_string h)
+
+let hs_stop h k' = hr_stop h k'
+
+let rec hr_prop h k' =
+  match h with
+  | H (c, f) -> f c k'
+  | HV (v) -> k' v
+  | _ -> VError ("Not a H function: " ^
+                 Value.to_string h)
+
+let rec hs_prop h k' =
+  match h with
+  | H (c, f) -> H ((fun x k'' -> hs_prop (c x k') k''), f)
+  | HV (v) -> k' v
+  | _ -> VError ("Not a H function: " ^
+                 Value.to_string h)
 
 (* CPS style *)
 (* Eval.g2 : Syntax.t -> (string, Value.t) Env.t ->  ? -> Value.t *)
@@ -139,12 +171,30 @@ let rec g2 expr env k = match expr with
         | _ -> k (v1)
       end)
   | Shift (x, t) ->
-    let new_env = Env.extend env x (VCont (fun v k' -> k' (k v))) in
-    g2 t new_env (fun a -> a)
+    let c1 = fun x k' -> hs_stop (k x) k' in
+    (* let new_env = Env.extend env x (VCont (c1)) in *)
+    (* let f1 = fun c k' -> g2 t new_env id in *)
+    let f1 = fun c k' -> g2 t (Env.extend env x (VCont (c))) k' in
+    H (c1, f1)
 
-  | Reset (t) ->
-    k (g2 t env (fun a -> a))
+  | Reset (t) -> hr_stop (g2 t env id) k
+
+  | Control (x, t) ->
+    let c1 = fun x k' -> hs_prop (k x) k' in
+    let f1 = fun c k' -> g2 t (Env.extend env x (VCont (c))) k' in
+    H (c1, f1)
+
+  | Prompt (t) -> g2 (Reset t) env k
+
+  | Shift0 (x, t) -> g2 (Shift (x, t)) env k
+
+  | Reset0 (t) -> hr_prop (g2 t env id) k
+
+  | Control0 (x, t) -> g2 (Control (x, t)) env k
+
+  | Prompt0 (t) -> g2 (Reset0 t) env k
+
 
 (* Eval.f : Syntax.t -> (string, Value.t) Env.t -> Value.t *)
 (* let f expr env = g1 expr env *)
-let f expr env = g2 expr env (fun x -> x)
+let f expr env = g2 (Reset (expr)) env (fun a -> a)
